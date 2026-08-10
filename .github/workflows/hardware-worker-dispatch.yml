@@ -162,6 +162,7 @@ jobs:
               headers={
                   "Content-Type": "application/json",
                   "Authorization": f"Bearer {payload['callback_token']}",
+                  "User-Agent": "Syqnal-Hardware-Worker/1.0",
               },
               method="POST",
           )
