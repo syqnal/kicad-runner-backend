@@ -148,7 +148,7 @@ jobs:
                   "duration_ms": check.get("duration_ms"),
                   "violations": check.get("violations") or [],
                   "summary": check.get("summary") or {},
-                  "logs": json.dumps(check, indent=2)[:10000],
+                  "logs": json.dumps({**check, "summary": {k: v for k, v in (check.get("summary") or {}).items() if k != "counterexample_vcd"}}, indent=2)[:10000],
               })
 
           mapped_ids = {item.get("run_id") for item in mapped}
