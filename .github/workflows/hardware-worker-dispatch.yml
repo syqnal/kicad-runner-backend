@@ -94,23 +94,52 @@ jobs:
           artifact = json.loads(artifact_path.read_text()) if artifact_path.exists() else {"checks": []}
           checks = artifact.get("checks") or []
 
-          by_type = {}
-          for run in requested:
-              by_type.setdefault(str(run.get("type") or "").upper(), []).append(run)
+          def norm_path(value):
+              path = str(value or "").replace("\\", "/").strip()
+              while path.startswith("./"):
+                  path = path[2:]
+              return path.lstrip("/")
 
-          used = set()
-          mapped = []
-          for check in checks:
-              check_type = str(check.get("type") or "").upper()
-              candidates = by_type.get(check_type, [])
-              run = next((candidate for candidate in candidates if id(candidate) not in used), None)
-              if not run:
+          def type_of(item):
+              return str(item.get("type") or "").upper()
+
+          # hardware-ci emits one check per matching file in the repo (e.g. it
+          # synthesizes every design file), so pair each requested run with the
+          # check for the file Syqnal asked about first, then fall back to the
+          # remaining checks of that type in order.
+          pairs = []
+          used_checks = set()
+          used_runs = set()
+          for run in requested:
+              wanted = norm_path(run.get("file_path"))
+              if not wanted:
                   continue
-              used.add(id(run))
+              for index, check in enumerate(checks):
+                  if index in used_checks or type_of(check) != type_of(run):
+                      continue
+                  if norm_path(check.get("file")) == wanted:
+                      pairs.append((run, check))
+                      used_checks.add(index)
+                      used_runs.add(id(run))
+                      break
+          for run in requested:
+              if id(run) in used_runs:
+                  continue
+              for index, check in enumerate(checks):
+                  if index in used_checks or type_of(check) != type_of(run):
+                      continue
+                  pairs.append((run, check))
+                  used_checks.add(index)
+                  used_runs.add(id(run))
+                  break
+
+          mapped = []
+          for run, check in pairs:
+              check_type = type_of(check)
               mapped.append({
                   "run_id": run.get("run_id"),
                   "type": check_type,
-                  "file_path": check.get("file") or run.get("file_path") or "",
+                  "file_path": norm_path(check.get("file")) or run.get("file_path") or "",
                   "status": check.get("status") or "ERROR",
                   "tool": check.get("tool"),
                   "tool_version": check.get("tool_version"),
