@@ -183,6 +183,29 @@ jobs:
                   "logs": json.dumps(artifact, indent=2)[:10000],
               })
 
+          # A layout OpenLane built on this runner only exists here: upload it to
+          # the URL Syqnal signed for that run, so the project page can show it.
+          import urllib.request
+          for item, (run, check) in zip(mapped, pairs):  # mapped starts with the pairs, in order
+              upload_url = run.get("upload_url")
+              gds_rel = (item.get("summary") or {}).get("gds_path")
+              if item.get("type") != "GDSII" or not upload_url or not gds_rel:
+                  continue
+              gds = Path(norm_path(check.get("file"))).parent / gds_rel
+              if not gds.is_file() or gds.stat().st_size > 200 * 1024 * 1024:
+                  continue
+              try:
+                  with gds.open("rb") as body:
+                      req = urllib.request.Request(upload_url, data=body, method="PUT", headers={
+                          "Content-Type": "application/octet-stream",
+                          "Content-Length": str(gds.stat().st_size),
+                      })
+                      urllib.request.urlopen(req, timeout=300).read()
+                  item["summary"] = {**item["summary"], "gds_uploaded": True}
+                  print(f"Uploaded {gds_rel} ({gds.stat().st_size} bytes)")
+              except Exception as exc:  # keep reporting results even if the upload fails
+                  print(f"GDS upload failed: {exc}")
+
           Path("/tmp/syqnal-results.json").write_text(json.dumps({"runs": mapped}, indent=2))
           PY
 
