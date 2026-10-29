@@ -145,6 +145,20 @@ jobs:
                   used_runs.add(id(run))
                   break
 
+          # Syqnal's callback runs on Vercel, which rejects request bodies over 4.5 MB.
+          BULKY_KEYS = {"counterexample_vcd", "layout_preview_svg_b64", "layoutPreviewSvgB64", "vcdB64", "vcd_b64"}
+          MAX_PREVIEW_CHARS = 512 * 1024
+
+          def slim_summary(summary):
+              summary = dict(summary)
+              # The KLayout preview came twice (snake_case and camelCase); keep one, if it's small.
+              summary.pop("layoutPreviewSvgB64", None)
+              preview = summary.get("layout_preview_svg_b64")
+              if isinstance(preview, str) and len(preview) > MAX_PREVIEW_CHARS:
+                  summary.pop("layout_preview_svg_b64")
+                  summary["layout_preview_dropped"] = "too large to send"
+              return summary
+
           mapped = []
           for run, check in pairs:
               check_type = type_of(check)
@@ -159,8 +173,8 @@ jobs:
                   "warning_count": check.get("warning_count", 0),
                   "duration_ms": check.get("duration_ms"),
                   "violations": check.get("violations") or [],
-                  "summary": check.get("summary") or {},
-                  "logs": json.dumps({**check, "summary": {k: v for k, v in (check.get("summary") or {}).items() if k != "counterexample_vcd"}}, indent=2)[:10000],
+                  "summary": slim_summary(check.get("summary") or {}),
+                  "logs": json.dumps({**check, "summary": {k: v for k, v in (check.get("summary") or {}).items() if k not in BULKY_KEYS}}, indent=2)[:10000],
               })
 
           mapped_ids = {item.get("run_id") for item in mapped}
@@ -201,12 +215,15 @@ jobs:
                           "Content-Length": str(gds.stat().st_size),
                       })
                       urllib.request.urlopen(req, timeout=300).read()
-                  item["summary"] = {**item["summary"], "gds_uploaded": True}
+                  summary = {k: v for k, v in item["summary"].items() if k != "layout_preview_svg_b64"}
+                  item["summary"] = {**summary, "gds_uploaded": True}  # the page shows the real layout instead
                   print(f"Uploaded {gds_rel} ({gds.stat().st_size} bytes)")
               except Exception as exc:  # keep reporting results even if the upload fails
                   print(f"GDS upload failed: {exc}")
 
-          Path("/tmp/syqnal-results.json").write_text(json.dumps({"runs": mapped}, indent=2))
+          body = json.dumps({"runs": mapped})
+          print(f"Callback body: {len(body.encode()) / 1024:.0f} KB for {len(mapped)} run(s)")
+          Path("/tmp/syqnal-results.json").write_text(body)
           PY
 
       - name: Report results to Syqnal
