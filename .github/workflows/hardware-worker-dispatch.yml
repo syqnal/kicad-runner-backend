@@ -17,9 +17,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/syqnal-payload.json <<'JSON'
-          ${{ toJson(github.event.client_payload) }}
-          JSON
+          # This repository is public, and so are its run logs. Read the payload
+          # from the event file instead of templating it into this script (which
+          # the log prints), and mask its secrets before any step can echo them.
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          payload = event.get("client_payload") or {}
+          secrets = [payload.get("callback_token")]
+          secrets += [run.get("upload_url") for run in payload.get("runs") or [] if isinstance(run, dict)]
+          for secret in secrets:
+              if secret:
+                  print(f"::add-mask::{secret}")
+          Path("/tmp/syqnal-payload.json").write_text(json.dumps(payload))
+          PY
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           from pathlib import Path
